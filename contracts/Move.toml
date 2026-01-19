@@ -25,6 +25,6 @@ zro = "0x10c"
 [dependencies]
 AptosFramework = { local = "aptos-core-main/aptos-move/framework/aptos-framework" }
 AptosTokenObjects = { local = "aptos-core-main/aptos-move/framework/aptos-token-objects" }
-layerzero_apps = { local = "LayerZero-Aptos-Contract-main/layerzero-apps" }
+layerzero_apps = { local = "LayerZero-Aptos-Contract-main/LayerZero-Aptos-Contract-main/layerzero-apps" }
 
 [dev-dependencies]

@@ -20,6 +20,7 @@ module YieldAggregator::yield_vault{
             vault_balance: u64,
             // deployer_addr: address,
             eth_remote_balance: u64,
+            // apt_tokens: coin::CoinStore<AptosCoin>,
             extendRef: ExtendRef,
         } 
 
@@ -48,19 +49,41 @@ module YieldAggregator::yield_vault{
     }
 
 
-    public fun deposit(account: &signer, deposit_amount: u64, vault_addr: address) acquires Treasury{
-       let shares_to_mint =  compute_shares(vault_addr, deposit_amount);
-       let creator_addr = signer::address_of(account);
+    public entry fun deposit(account: &signer, deposit_amount: u64, vault_addr: address) acquires Treasury {
+        let creator_addr = signer::address_of(account);
 
-    //    let constrcutor_ref = object::create_object_from_account
+        let coins: Coin<AptosCoin> = coin::withdraw<AptosCoin>(account, deposit_amount);
+        assert!(coin::value(&coins) == deposit_amount, 1); 
 
+        coin::deposit<AptosCoin>(vault_addr, coins);
+
+        let shares_to_mint = compute_shares(vault_addr, deposit_amount);
+
+        let constructor_ref = object::create_object(creator_addr);
+        let transferRef = object::generate_transfer_ref(&constructor_ref);
+        let deleteRef = object::generate_delete_ref(&constructor_ref);            
+
+        move_to(creator_addr, DepositShares {
+            deposit_amount,
+            deposit_time: timestamp::now_microseconds(),
+            shares: shares_to_mint,
+            transferRef,
+            deleteRef,
+            creator: creator_addr,
+        });
+
+        let vault_ref = borrow_global_mut<Treasury>(vault_addr);
+        vault_ref.vault_balance = vault_ref.vault_balance + deposit_amount;
+        vault_ref.total_shares = vault_ref.total_shares + shares_to_mint;
     }
 
-
-    fun compute_shares(vault_addr: address, deposit_amount: u64): u64 acquires Treasury{
-        let vault_ref = borrow_global_mut<Treasury>(vault_addr);
-        let shares_to_mint = ((vault_ref.total_shares + vault_ref.eth_remote_balance) * deposit_amount) / vault_ref.vault_balance;
-        shares_to_mint
-     }
+    fun compute_shares(vault_addr: address, deposit_amount: u64): u64 acquires Treasury {
+        let vault_ref = borrow_global<Treasury>(vault_addr);
+        if (vault_ref.vault_balance == 0 || vault_ref.total_shares == 0) {
+            deposit_amount
+        } else {
+            ((vault_ref.total_shares + vault_ref.eth_remote_balance) * deposit_amount) / vault_ref.vault_balance
+        }
+    }
 
 }

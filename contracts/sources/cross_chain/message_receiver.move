@@ -1,3 +1,8 @@
+module YieldAggregator::cross_chain_message{
+
+
+//implement cross chain messaging to pass strategy instructions to adapters on other chains
+
 struct Intent {
     nonce: u64,
     strategy_id: u64,
@@ -13,3 +18,5 @@ public fun verify(
     intent: &Intent,
     signature: vector<u8>
 )
+
+}
