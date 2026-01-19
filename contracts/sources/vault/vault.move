@@ -11,9 +11,10 @@ module YieldAggregator::yield_vault{
     use aptos_framework::account;   
 
 
-    const NOT_CONTRACT_OWNER: u8 = 1;
+    // const NOT_CONTRACT_OWNER: u8 = 1;
+    
 
-
+//implement for later only keep a section of deposits in hot storgae to handle withdrawals and move the rest to hard wallet / multi-sig wallet    
     #[resource_group_member(group = aptos_framework::object::ObjectGroup)]
     struct Treasury has key {
             total_shares: u64,
