@@ -18,5 +18,5 @@ public fun verify(
     intent: &Intent,
     signature: vector<u8>
 )
-
+{}
 }

@@ -53,7 +53,7 @@ module YieldAggregator::yield_vault{
     public entry fun deposit(account: &signer, deposit_amount: u64, vault_addr: address) acquires Treasury {
         let creator_addr = signer::address_of(account);
 
-        let coins: Coin<AptosCoin> = coin::withdraw<AptosCoin>(account, deposit_amount);
+        let coins = coin::withdraw<AptosCoin>(account, deposit_amount);
         assert!(coin::value(&coins) == deposit_amount, 1); 
 
         coin::deposit<AptosCoin>(vault_addr, coins);
@@ -64,7 +64,7 @@ module YieldAggregator::yield_vault{
         let transferRef = object::generate_transfer_ref(&constructor_ref);
         let deleteRef = object::generate_delete_ref(&constructor_ref);            
 
-        move_to(creator_addr, DepositShares {
+        move_to(account, DepositShares {
             deposit_amount,
             deposit_time: timestamp::now_microseconds(),
             shares: shares_to_mint,
@@ -85,6 +85,18 @@ module YieldAggregator::yield_vault{
         } else {
             ((vault_ref.total_shares + vault_ref.eth_remote_balance) * deposit_amount) / vault_ref.vault_balance
         }
+    }
+
+
+    #[test_only]
+    public fun test_vault_deposit(account: &signer) {
+        let vault_addr = signer::address_of(account);
+        init(account);
+        deposit(account, 100, vault_addr);
+        let vault = borrow_global<Treasury>(vault_addr);
+        let vault_balam = vault.vault_balance;
+        debug::print(&vault_balam);
+        assert!(vault.vault_balance == 80);
     }
 
 }
