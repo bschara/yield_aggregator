@@ -6,7 +6,7 @@ module YieldAggregator::yield_vault{
     use aptos_framework::object::{Self, Object, DeleteRef, ExtendRef, TransferRef};
     use aptos_framework::event::{Self};
     use aptos_framework::coin::{Self};
-    use aptos_framework::aptos_coin::AptosCoin;
+    use aptos_framework::aptos_coin;
     use aptos_framework::timestamp;
     use aptos_framework::account;   
 
@@ -53,10 +53,10 @@ module YieldAggregator::yield_vault{
     public entry fun deposit(account: &signer, deposit_amount: u64, vault_addr: address) acquires Treasury {
         let creator_addr = signer::address_of(account);
 
-        let coins = coin::withdraw<AptosCoin>(account, deposit_amount);
+        let coins = coin::withdraw<aptos_coin::AptosCoin>(account, deposit_amount);
         assert!(coin::value(&coins) == deposit_amount, 1); 
 
-        coin::deposit<AptosCoin>(vault_addr, coins);
+        coin::deposit<aptos_coin::AptosCoin>(vault_addr, coins);
 
         let shares_to_mint = compute_shares(vault_addr, deposit_amount);
 
@@ -88,15 +88,36 @@ module YieldAggregator::yield_vault{
     }
 
 
-    #[test_only]
-    public fun test_vault_deposit(account: &signer) {
-        let vault_addr = signer::address_of(account);
-        init(account);
-        deposit(account, 100, vault_addr);
-        let vault = borrow_global<Treasury>(vault_addr);
-        let vault_balam = vault.vault_balance;
-        debug::print(&vault_balam);
-        assert!(vault.vault_balance == 80);
+    #[test(arg = @0x123, user = @0x5446, framework = @0x1)]
+    public fun test_vault_deposit(arg: &signer, user: &signer, framework: signer) {
+        timestamp::set_time_has_started_for_testing(&framework);
+        
+        let (burn_cap, mint_cap) = aptos_coin::initialize_for_test(&framework);
+
+        let vault_addr = signer::address_of(arg);
+        account::create_account_for_test(vault_addr);
+        coin::register<aptos_coin::AptosCoin>(arg);
+        
+        let user_addr = signer::address_of(user);
+        account::create_account_for_test(user_addr);
+        coin::register<aptos_coin::AptosCoin>(user);
+
+
+        let coins = coin::mint(10000, &mint_cap);
+        coin::deposit(vault_addr, coins);
+
+        let coins = coin::mint(1000, &mint_cap);
+        coin::deposit(user_addr, coins);
+        
+        init(arg);
+        
+        deposit(user, 100, vault_addr);
+        
+        let user_balance = coin::balance<aptos_coin::AptosCoin>(user_addr);
+        debug::print(&user_balance);
+        assert!(user_balance < 901);
+        coin::destroy_mint_cap(mint_cap);
+        coin::destroy_burn_cap(burn_cap);
     }
 
 }
