@@ -1,4 +1,4 @@
-module LayerZeroTest::aptos_oft {
+module YieldAggregator::aptos_oft {
     use aptos_framework::coin::{Coin, withdraw, deposit};
     use aptos_framework::aptos_coin::AptosCoin;
     use aptos_framework::aptos_coin;
