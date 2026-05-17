@@ -5,7 +5,8 @@ module YieldAggregator::eth_bridge_adapter {
     use aptos_framework::aptos_coin::AptosCoin;
     use aptos_framework::account::{Self, SignerCapability};
     use aptos_framework::timestamp;
-    use YieldAggregator::oft_bridge;
+    use YieldAggregator::oft_bridge::{Self, BridgeCapability};
+    use YieldAggregator::adapter_registry;
 
     const ADAPTER_SEED: vector<u8> = b"EthBridgeAdapter";
 
@@ -18,13 +19,16 @@ module YieldAggregator::eth_bridge_adapter {
     struct EthAdapter has key {
         owner: address,
         signer_cap: SignerCapability,
-        vault_addr: address,       // vault this adapter reports to
-        bridge_addr: address,      // oft_bridge module address
-        dst_chain_id: u64,         // Ethereum LayerZero chain ID (101)
-        dst_executor: vector<u8>,  // 32-byte EthStrategyExecutor address on Ethereum
-        strategy_id: u64,          // strategy ID in the vault registry
-        deployed: u128,            // informational: APT currently on Ethereum
-        nonce: u64,                // monotonic counter for cross-chain messages
+        bridge_cap: BridgeCapability,  // authorizes calls to oft_bridge::bridge_out
+        vault_addr: address,
+        bridge_addr: address,
+        dst_chain_id: u64,
+        // 32-byte VaultOFT address on Ethereum the LayerZero receiver contract.
+        // EthStrategyExecutor is called internally by VaultOFT after LZ delivery.
+        dst_vault_oft: vector<u8>,
+        strategy_id: u64,
+        deployed: u128,
+        nonce: u64,
     }
 
     #[event]
@@ -47,13 +51,14 @@ module YieldAggregator::eth_bridge_adapter {
         timestamp: u64,
     }
 
-    public entry fun init(
+    public fun init(
         account: &signer,
         vault_addr: address,
         bridge_addr: address,
         dst_chain_id: u64,
-        dst_executor: vector<u8>,
+        dst_vault_oft: vector<u8>,  // 32-byte VaultOFT address on Ethereum
         strategy_id: u64,
+        bridge_cap: BridgeCapability,
     ) {
         let owner = signer::address_of(account);
         let (adapter_signer, signer_cap) = account::create_resource_account(account, ADAPTER_SEED);
@@ -62,30 +67,31 @@ module YieldAggregator::eth_bridge_adapter {
         move_to(&adapter_signer, EthAdapter {
             owner,
             signer_cap,
+            bridge_cap,
             vault_addr,
             bridge_addr,
             dst_chain_id,
-            dst_executor,
+            dst_vault_oft,
             strategy_id,
             deployed: 0,
             nonce: 0,
         });
+
+        adapter_registry::register_adapter(&adapter_signer, adapter_registry::type_eth_bridge(), true);
     }
 
-    // Returns the deterministic adapter address for a given owner.
     public fun adapter_address(owner: address): address {
         account::create_resource_address(&owner, ADAPTER_SEED)
     }
 
-    // Two-step deploy flow:
-    //   1. Vault calls deploy_to_strategy to deposits APT to adapter's CoinStore.
-    //   2. Operator calls bridge_out here to withdraws APT and forwards via oft_bridge.
-    // The vault address encoded in the payload tells Ethereum where to return funds.
-
+    // Manual operator entry point use when you want explicit control over bridging
+    // rather than relying on trigger_deposit from the vault dispatch path.
+    // Fee is withdrawn from caller's account; APT must already be in adapter CoinStore.
     public entry fun bridge_out(
         account: &signer,
         adapter_addr: address,
         amount: u64,
+        fee_amount: u64,
     ) acquires EthAdapter {
         let state = borrow_global_mut<EthAdapter>(adapter_addr);
         assert!(signer::address_of(account) == state.owner, ENOT_OWNER);
@@ -95,116 +101,85 @@ module YieldAggregator::eth_bridge_adapter {
 
         let adapter_signer = account::create_signer_with_capability(&state.signer_cap);
         let coins = coin::withdraw<AptosCoin>(&adapter_signer, amount);
+        let fee   = coin::withdraw<AptosCoin>(account, fee_amount);
 
         let payload = oft_bridge::encode_payload(
-            ACTION_DEPLOY,
-            amount,
-            state.strategy_id,
-            nonce,
-            state.vault_addr,
+            ACTION_DEPLOY, amount, state.strategy_id, nonce, state.vault_addr,
         );
 
-        let bridge_addr = state.bridge_addr;
+        let bridge_addr   = state.bridge_addr;
+        let dst_chain_id  = state.dst_chain_id;
+        let dst_vault_oft = state.dst_vault_oft;
         oft_bridge::bridge_out(
-            account,
-            bridge_addr,
-            coins,
-            state.dst_chain_id,
-            state.dst_executor,
-            payload,
-            coin::zero<AptosCoin>(),  // fee stub: caller funds fee separately or uses estimateFees
-            vector::empty<u8>(),
+            &state.bridge_cap, bridge_addr, coins,
+            dst_chain_id, dst_vault_oft, payload, fee, vector::empty<u8>(),
         );
 
         state.deployed = state.deployed + (amount as u128);
 
-        0x1::event::emit(DeployBridgedEvent {
-            amount,
-            nonce,
-            timestamp: timestamp::now_microseconds(),
-        });
+        0x1::event::emit(DeployBridgedEvent { amount, nonce, timestamp: timestamp::now_microseconds() });
     }
 
-    // Signals Ethereum to withdraw `amount` from the strategy and send it back.
-    // No APT is locked here the principal is already on Ethereum.
-    // Coins return asynchronously via oft_bridge::lz_receive to message_receiver.
-
+    // Signal Ethereum to withdraw `amount` and send it back.
+    // Fee withdrawn from caller's account.
     public entry fun send_recall(
         account: &signer,
         adapter_addr: address,
         amount: u64,
+        fee_amount: u64,
     ) acquires EthAdapter {
         let state = borrow_global_mut<EthAdapter>(adapter_addr);
         assert!(signer::address_of(account) == state.owner, ENOT_OWNER);
 
         state.nonce = state.nonce + 1;
         let nonce = state.nonce;
+        let fee = coin::withdraw<AptosCoin>(account, fee_amount);
 
         let payload = oft_bridge::encode_payload(
-            ACTION_RECALL,
-            amount,
-            state.strategy_id,
-            nonce,
-            state.vault_addr,
+            ACTION_RECALL, amount, state.strategy_id, nonce, state.vault_addr,
         );
 
-        let bridge_addr = state.bridge_addr;
+        let bridge_addr   = state.bridge_addr;
+        let dst_chain_id  = state.dst_chain_id;
+        let dst_vault_oft = state.dst_vault_oft;
         oft_bridge::bridge_out(
-            account,
-            bridge_addr,
-            coin::zero<AptosCoin>(),  // no new APT locked; recall returns existing locked APT
-            state.dst_chain_id,
-            state.dst_executor,
-            payload,
-            coin::zero<AptosCoin>(),
-            vector::empty<u8>(),
+            &state.bridge_cap, bridge_addr, coin::zero<AptosCoin>(),
+            dst_chain_id, dst_vault_oft, payload, fee, vector::empty<u8>(),
         );
 
-        0x1::event::emit(RecallSentEvent {
-            amount,
-            nonce,
-            timestamp: timestamp::now_microseconds(),
-        });
+        0x1::event::emit(RecallSentEvent { amount, nonce, timestamp: timestamp::now_microseconds() });
     }
 
-    // Send harvest message (Aptos to Ethereum)
-    // Instructs Ethereum to collect accumulated yield and send it back as APT.
-
+    // Signal Ethereum to collect yield and send it back.
+    // Fee withdrawn from caller's account.
     public entry fun send_harvest(
         account: &signer,
         adapter_addr: address,
+        fee_amount: u64,
     ) acquires EthAdapter {
         let state = borrow_global_mut<EthAdapter>(adapter_addr);
         assert!(signer::address_of(account) == state.owner, ENOT_OWNER);
 
         state.nonce = state.nonce + 1;
         let nonce = state.nonce;
+        let fee = coin::withdraw<AptosCoin>(account, fee_amount);
 
         let payload = oft_bridge::encode_payload(
-            ACTION_HARVEST,
-            0,   // amount=0; Ethereum determines how much yield to send
-            state.strategy_id,
-            nonce,
-            state.vault_addr,
+            ACTION_HARVEST, 0, state.strategy_id, nonce, state.vault_addr,
         );
 
-        let bridge_addr = state.bridge_addr;
+        let bridge_addr   = state.bridge_addr;
+        let dst_chain_id  = state.dst_chain_id;
+        let dst_vault_oft = state.dst_vault_oft;
         oft_bridge::bridge_out(
-            account,
-            bridge_addr,
-            coin::zero<AptosCoin>(),
-            state.dst_chain_id,
-            state.dst_executor,
-            payload,
-            coin::zero<AptosCoin>(),
-            vector::empty<u8>(),
+            &state.bridge_cap, bridge_addr, coin::zero<AptosCoin>(),
+            dst_chain_id, dst_vault_oft, payload, fee, vector::empty<u8>(),
         );
 
-        0x1::event::emit(HarvestSentEvent {
-            nonce,
-            timestamp: timestamp::now_microseconds(),
-        });
+        0x1::event::emit(HarvestSentEvent { nonce, timestamp: timestamp::now_microseconds() });
     }
+
+    public fun trigger_emergency_exit(_adapter_addr: address, _fee_amount: u64) {}
 
     #[test_only]
     public fun get_deployed(adapter_addr: address): u128 acquires EthAdapter {

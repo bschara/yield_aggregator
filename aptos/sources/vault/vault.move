@@ -11,6 +11,7 @@ module YieldAggregator::yield_vault{
     use aptos_framework::account::{Self, SignerCapability};
     use YieldAggregator::strategy_registry;
     use YieldAggregator::adapter_interface;
+    use YieldAggregator::adapter_registry;
 
 //implement for later only keep a section of deposits in hot storgae to handle withdrawals and move the rest to hard wallet / multi-sig wallet
     struct Vault has key {
@@ -213,6 +214,7 @@ module YieldAggregator::yield_vault{
         registry_addr: address,
         strategy_id: u64,
         amount: u64,
+        fee_amount: u64,
     ) acquires Vault {
         let caller = signer::address_of(account);
         let vault_ref = borrow_global_mut<Vault>(vault_addr);
@@ -226,7 +228,7 @@ module YieldAggregator::yield_vault{
         let coins = coin::withdraw<aptos_coin::AptosCoin>(&vault_signer, amount);
         coin::deposit<aptos_coin::AptosCoin>(adapter_addr, coins);
 
-        adapter_interface::deposit(adapter_addr, amount);
+        adapter_interface::deposit(adapter_addr, amount, fee_amount);
 
         vault_ref.idle_assets = vault_ref.idle_assets - (amount as u128);
         vault_ref.deployed_assets = vault_ref.deployed_assets + (amount as u128);
@@ -252,6 +254,7 @@ module YieldAggregator::yield_vault{
         registry_addr: address,
         strategy_id: u64,
         amount: u64,
+        fee_amount: u64,
     ) acquires Vault {
         let caller = signer::address_of(account);
         let vault_ref = borrow_global_mut<Vault>(vault_addr);
@@ -262,13 +265,16 @@ module YieldAggregator::yield_vault{
         assert!((amount as u128) <= alloc, error::resource_exhausted(EINSUFFICIENT_ALLOCATION));
 
         let adapter_addr = strategy_registry::get_adapter(registry_addr, strategy_id);
-        adapter_interface::withdraw(adapter_addr, amount);
+        adapter_interface::withdraw(adapter_addr, amount, fee_amount);
 
-        vault_ref.idle_assets = vault_ref.idle_assets + (amount as u128);
-        vault_ref.deployed_assets = vault_ref.deployed_assets - (amount as u128);
-
-        let alloc_mut = table::borrow_mut(&mut vault_ref.allocations, strategy_id);
-        *alloc_mut = *alloc_mut - (amount as u128);
+        // Async adapters (cross-chain) update accounting via credit_bridge_return
+        // when funds actually arrive. Updating here too would double-count.
+        if (!adapter_registry::is_async_adapter(adapter_addr)) {
+            vault_ref.idle_assets = vault_ref.idle_assets + (amount as u128);
+            vault_ref.deployed_assets = vault_ref.deployed_assets - (amount as u128);
+            let alloc_mut = table::borrow_mut(&mut vault_ref.allocations, strategy_id);
+            *alloc_mut = *alloc_mut - (amount as u128);
+        };
 
         0x1::event::emit(RecallEvent {
             strategy_id,
@@ -282,6 +288,7 @@ module YieldAggregator::yield_vault{
         vault_addr: address,
         registry_addr: address,
         strategy_id: u64,
+        fee_amount: u64,
     ) acquires Vault {
         let caller = signer::address_of(account);
         let vault_ref = borrow_global_mut<Vault>(vault_addr);
@@ -290,7 +297,7 @@ module YieldAggregator::yield_vault{
         assert!(table::contains(&vault_ref.allocations, strategy_id), error::not_found(EINSUFFICIENT_ALLOCATION));
 
         let adapter_addr = strategy_registry::get_adapter(registry_addr, strategy_id);
-        adapter_interface::harvest(adapter_addr);
+        adapter_interface::harvest(adapter_addr, fee_amount);
 
         // Yield accrual into total_assets is handled by the adapter returning coins.
         // Real implementation: adapter deposits yield coins back to vault_addr here.

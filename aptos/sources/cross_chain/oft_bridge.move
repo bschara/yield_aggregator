@@ -24,6 +24,10 @@ module YieldAggregator::oft_bridge {
 
     struct VaultBridgeOFT has key {}
 
+    // Issued once by init() and stored in EthAdapter (or any authorized caller).
+    // Holding this is proof of authorization to call bridge_out no signer needed.
+    struct BridgeCapability has store, drop {}
+
     struct BridgeState has key {
         owner: address,
         lz_cap: UaCapability<VaultBridgeOFT>,
@@ -62,7 +66,7 @@ module YieldAggregator::oft_bridge {
 
     const ETH_CHAIN_ID: u64 = 101;
 
-    public entry fun init(account: &signer, shared_decimals: u8) {
+    public fun init(account: &signer, shared_decimals: u8): BridgeCapability {
         let lz_cap = oft::init_oft<VaultBridgeOFT>(
             account,
             b"Vault Bridge Token",
@@ -81,6 +85,8 @@ module YieldAggregator::oft_bridge {
             trusted_remotes: table::new<u64, vector<u8>>(),
             processed_nonces: table::new<u64, bool>(),
         });
+
+        BridgeCapability {}
     }
 
     public entry fun set_trusted_remote(
@@ -115,7 +121,7 @@ module YieldAggregator::oft_bridge {
     // @YieldAggregator deployer), as endpoint::send requires the UA signer.
 
     public fun bridge_out(
-        bridge_owner: &signer,
+        _cap: &BridgeCapability,
         bridge_addr: address,
         apt_coins: Coin<AptosCoin>,
         dst_chain_id: u64,
@@ -126,7 +132,6 @@ module YieldAggregator::oft_bridge {
     ) acquires BridgeState {
         let amount = coin::value(&apt_coins);
         let state = borrow_global_mut<BridgeState>(bridge_addr);
-        assert!(signer::address_of(bridge_owner) == state.owner, ENOT_OWNER);
 
         // Lock APT as cross-chain collateral.
         coin::merge(&mut state.locked_apt, apt_coins);
@@ -161,12 +166,26 @@ module YieldAggregator::oft_bridge {
         });
     }
 
-    //lz_receive (Ethereum to Aptos)
-    // Entry point called by the LayerZero executor when a message arrives from
-    // Ethereum. Verifies the trusted remote, decodes the payload, unlocks APT,
-    // and notifies message_receiver to update vault accounting.
-
+    // Production entry point called by the LayerZero executor when a message
+    // arrives from Ethereum. First consumes the packet from the LZ inbox (advancing
+    // the inbound nonce so the executor won't retry), then processes it.
     public entry fun lz_receive(
+        src_chain_id: u64,
+        src_address: vector<u8>,
+        payload: vector<u8>,
+        bridge_addr: address,
+    ) acquires BridgeState {
+        // Borrow immutably just for lz_cap, then release before the mutable borrow in impl.
+        {
+            let state = borrow_global<BridgeState>(bridge_addr);
+            endpoint::lz_receive<VaultBridgeOFT>(src_chain_id, src_address, payload, &state.lz_cap);
+        };
+        lz_receive_impl(src_chain_id, src_address, payload, bridge_addr);
+    }
+
+    // Internal payload processor validates trusted remote, decodes payload,
+    // unlocks APT, and updates vault accounting.
+    fun lz_receive_impl(
         src_chain_id: u64,
         src_address: vector<u8>,
         payload: vector<u8>,
@@ -178,15 +197,6 @@ module YieldAggregator::oft_bridge {
         assert!(table::contains(&state.trusted_remotes, src_chain_id), EUNTRUSTED_REMOTE);
         let expected = table::borrow(&state.trusted_remotes, src_chain_id);
         assert!(*expected == src_address, EUNTRUSTED_REMOTE);
-
-        // Consume the packet from the LayerZero inbox, advancing the inbound nonce.
-        // This call is required in production so the executor does not retry delivery.
-        // It must be commented out in unit tests because tests call lz_receive directly
-        // without routing a real packet through the LZ endpoint queue first.
-        //
-        // PRODUCTION: uncomment before deployment.
-        //
-        //   endpoint::lz_receive<VaultBridgeOFT>(src_chain_id, src_address, payload, &state.lz_cap);
 
         // Decode custom payload:
         //   [0]      action    u8
@@ -218,6 +228,19 @@ module YieldAggregator::oft_bridge {
             action,
             timestamp: timestamp::now_microseconds(),
         });
+    }
+
+    // Test-only bypass: skips the LZ endpoint queue check so tests can call
+    // lz_receive_impl directly without routing a packet through the real LZ stack.
+    // Use lz_receive (the production entry) for deliver_packet-based tests.
+    #[test_only]
+    public fun lz_receive_for_test(
+        src_chain_id: u64,
+        src_address: vector<u8>,
+        payload: vector<u8>,
+        bridge_addr: address,
+    ) acquires BridgeState {
+        lz_receive_impl(src_chain_id, src_address, payload, bridge_addr);
     }
 
     // Payload helpers
@@ -291,8 +314,7 @@ module YieldAggregator::oft_bridge {
         relayer: &signer,
         executor: &signer,
         executor_auth_signer: &signer,
-    ) {
-        // Ensure runtime accounts exist for the oracle/relayer/executor
+    ): BridgeCapability {
         fw_account::create_account_for_test(signer::address_of(oracle));
         fw_account::create_account_for_test(signer::address_of(relayer));
         fw_account::create_account_for_test(signer::address_of(executor));
@@ -308,7 +330,12 @@ module YieldAggregator::oft_bridge {
             101, // Ethereum dst chain id
         );
 
-        init(bridge_acct, 6); // 6 shared decimals
+        init(bridge_acct, 6)
+    }
+
+    #[test_only]
+    public fun create_test_bridge_cap(): BridgeCapability {
+        BridgeCapability {}
     }
 
     #[test_only]

@@ -18,6 +18,8 @@ module YieldAggregator::bridge_tests {
     use YieldAggregator::message_receiver;
     use YieldAggregator::oft_bridge;
     use YieldAggregator::eth_bridge_adapter;
+    use layerzero::test_helpers;
+    use layerzero_common::packet;
 
     // ── Vault setup helper ────────────────────────────────────────────────────
 
@@ -273,6 +275,7 @@ module YieldAggregator::bridge_tests {
             101u64,   // dst_chain_id (Ethereum)
             dst_executor,
             1u64,     // strategy_id
+            oft_bridge::create_test_bridge_cap(),
         );
 
         let adapter_addr = eth_bridge_adapter::adapter_address(owner_addr);
@@ -305,6 +308,7 @@ module YieldAggregator::bridge_tests {
             101u64,
             dst_executor,
             5u64,
+            oft_bridge::create_test_bridge_cap(),
         );
 
         let adapter_addr = eth_bridge_adapter::adapter_address(owner_addr);
@@ -330,15 +334,14 @@ module YieldAggregator::bridge_tests {
         executor: &signer,
         executor_auth: &signer,
         framework: &signer,
-    ): (coin::MintCapability<aptos_coin::AptosCoin>, coin::BurnCapability<aptos_coin::AptosCoin>) {
+    ): (oft_bridge::BridgeCapability, coin::MintCapability<aptos_coin::AptosCoin>, coin::BurnCapability<aptos_coin::AptosCoin>) {
         let (burn_cap, mint_cap) = aptos_coin::initialize_for_test(framework);
         timestamp::set_time_has_started_for_testing(framework);
         account::create_account_for_test(signer::address_of(bridge_acct));
-        // oft_bridge::init registers AptosCoin internally, so no need to register here
-        oft_bridge::init_bridge_for_test(
+        let cap = oft_bridge::init_bridge_for_test(
             bridge_acct, lz, msglib_auth, oracle, relayer, executor, executor_auth,
         );
-        (mint_cap, burn_cap)
+        (cap, mint_cap, burn_cap)
     }
 
     #[test(
@@ -361,7 +364,7 @@ module YieldAggregator::bridge_tests {
         executor_auth: &signer,
         framework: &signer,
     ) {
-        let (mint_cap, burn_cap) = setup_lz_bridge(bridge_acct, lz, msglib_auth, oracle, relayer, executor, executor_auth, framework);
+        let (cap, mint_cap, burn_cap) = setup_lz_bridge(bridge_acct, lz, msglib_auth, oracle, relayer, executor, executor_auth, framework);
         let bridge_addr = signer::address_of(bridge_acct);
         assert!(oft_bridge::bridge_state_exists(bridge_addr), 0);
         assert!(oft_bridge::get_locked_apt(bridge_addr) == 0, 1);
@@ -389,7 +392,7 @@ module YieldAggregator::bridge_tests {
         executor_auth: &signer,
         framework: &signer,
     ) {
-        let (mint_cap, burn_cap) = setup_lz_bridge(bridge_acct, lz, msglib_auth, oracle, relayer, executor, executor_auth, framework);
+        let (cap, mint_cap, burn_cap) = setup_lz_bridge(bridge_acct, lz, msglib_auth, oracle, relayer, executor, executor_auth, framework);
         let bridge_addr = signer::address_of(bridge_acct);
         let remote = vector::empty<u8>();
         let i = 0u64; while (i < 32) { vector::push_back(&mut remote, 0xEEu8); i = i + 1; };
@@ -422,7 +425,7 @@ module YieldAggregator::bridge_tests {
         executor_auth: &signer,
         framework: &signer,
     ) {
-        let (mint_cap, burn_cap) = setup_lz_bridge(bridge_acct, lz, msglib_auth, oracle, relayer, executor, executor_auth, framework);
+        let (cap, mint_cap, burn_cap) = setup_lz_bridge(bridge_acct, lz, msglib_auth, oracle, relayer, executor, executor_auth, framework);
         let bridge_addr = signer::address_of(bridge_acct);
         let remote = vector::empty<u8>();
         let i = 0u64; while (i < 32) { vector::push_back(&mut remote, 0xAAu8); i = i + 1; };
@@ -452,7 +455,7 @@ module YieldAggregator::bridge_tests {
         executor_auth: &signer,
         framework: &signer,
     ) {
-        let (mint_cap, burn_cap) = setup_lz_bridge(bridge_acct, lz, msglib_auth, oracle, relayer, executor, executor_auth, framework);
+        let (cap, mint_cap, burn_cap) = setup_lz_bridge(bridge_acct, lz, msglib_auth, oracle, relayer, executor, executor_auth, framework);
         let bridge_addr = signer::address_of(bridge_acct);
 
         let coins = coin::mint<aptos_coin::AptosCoin>(500, &mint_cap);
@@ -461,7 +464,7 @@ module YieldAggregator::bridge_tests {
         let i = 0u64; while (i < 32) { vector::push_back(&mut dst, 0u8); i = i + 1; };
         let payload = oft_bridge::encode_payload(1u8, 500u64, 1u64, 1u64, @0x200);
 
-        oft_bridge::bridge_out(bridge_acct, bridge_addr, coins, 101u64, dst, payload, coin::zero<aptos_coin::AptosCoin>(), vector::empty<u8>());
+        oft_bridge::bridge_out(&cap, bridge_addr, coins, 101u64, dst, payload, coin::zero<aptos_coin::AptosCoin>(), vector::empty<u8>());
 
         assert!(oft_bridge::get_locked_apt(bridge_addr) == locked_before + 500, 0);
         coin::destroy_mint_cap(mint_cap);
@@ -491,7 +494,7 @@ module YieldAggregator::bridge_tests {
         executor_auth: &signer,
         framework: &signer,
     ) {
-        let (mint_cap, burn_cap) = setup_lz_bridge(bridge_acct, lz, msglib_auth, oracle, relayer, executor, executor_auth, framework);
+        let (cap, mint_cap, burn_cap) = setup_lz_bridge(bridge_acct, lz, msglib_auth, oracle, relayer, executor, executor_auth, framework);
         let bridge_addr = signer::address_of(bridge_acct);
         coin::destroy_mint_cap(mint_cap);
         coin::destroy_burn_cap(burn_cap);
@@ -499,7 +502,7 @@ module YieldAggregator::bridge_tests {
         let src_addr = vector::empty<u8>();
         let i = 0u64; while (i < 32) { vector::push_back(&mut src_addr, 0xBBu8); i = i + 1; };
         let payload = oft_bridge::encode_payload(4u8, 100u64, 1u64, 1u64, @0x200);
-        oft_bridge::lz_receive(101u64, src_addr, payload, bridge_addr);
+        oft_bridge::lz_receive_for_test(101u64, src_addr, payload, bridge_addr);
     }
 
     #[test(
@@ -525,7 +528,7 @@ module YieldAggregator::bridge_tests {
         executor_auth: &signer,
         framework: &signer,
     ) {
-        let (mint_cap, burn_cap) = setup_lz_bridge(bridge_acct, lz, msglib_auth, oracle, relayer, executor, executor_auth, framework);
+        let (cap, mint_cap, burn_cap) = setup_lz_bridge(bridge_acct, lz, msglib_auth, oracle, relayer, executor, executor_auth, framework);
         let bridge_addr = signer::address_of(bridge_acct);
         coin::destroy_mint_cap(mint_cap);
         coin::destroy_burn_cap(burn_cap);
@@ -534,7 +537,7 @@ module YieldAggregator::bridge_tests {
         let i = 0u64; while (i < 32) { vector::push_back(&mut remote, 0xCCu8); i = i + 1; };
         oft_bridge::set_trusted_remote(bridge_acct, bridge_addr, 101u64, remote);
         let payload = oft_bridge::encode_payload(4u8, 100u64, 1u64, 1u64, @0x200);
-        oft_bridge::lz_receive(109u64, remote, payload, bridge_addr); // wrong chain
+        oft_bridge::lz_receive_for_test(109u64, remote, payload, bridge_addr); // wrong chain
     }
 
     #[test(
@@ -559,7 +562,7 @@ module YieldAggregator::bridge_tests {
         executor_auth: &signer,
         framework: &signer,
     ) {
-        let (mint_cap, burn_cap) = setup_lz_bridge(bridge_acct, lz, msglib_auth, oracle, relayer, executor, executor_auth, framework);
+        let (cap, mint_cap, burn_cap) = setup_lz_bridge(bridge_acct, lz, msglib_auth, oracle, relayer, executor, executor_auth, framework);
         let bridge_addr = signer::address_of(bridge_acct);
 
         // Set up vault without re-initialising AptosCoin (already done in setup_lz_bridge)
@@ -578,7 +581,7 @@ module YieldAggregator::bridge_tests {
         let lock_coins = coin::mint<aptos_coin::AptosCoin>(300, &mint_cap);
         let dst = vector::empty<u8>(); let i = 0u64; while (i < 32) { vector::push_back(&mut dst, 0u8); i = i + 1; };
         let out_payload = oft_bridge::encode_payload(1u8, 300u64, 1u64, 0u64, vault_addr);
-        oft_bridge::bridge_out(bridge_acct, bridge_addr, lock_coins, 101u64, dst, out_payload, coin::zero<aptos_coin::AptosCoin>(), vector::empty<u8>());
+        oft_bridge::bridge_out(&cap, bridge_addr, lock_coins, 101u64, dst, out_payload, coin::zero<aptos_coin::AptosCoin>(), vector::empty<u8>());
         assert!(oft_bridge::get_locked_apt(bridge_addr) == 300, 0);
 
         // Register trusted remote
@@ -594,6 +597,89 @@ module YieldAggregator::bridge_tests {
         assert!(oft_bridge::get_locked_apt(bridge_addr) == 100, 1);      // 300 - 200
         assert!(yield_vault::get_idle_assets(vault_addr) == idle_before + 200, 2);
         assert!(oft_bridge::is_nonce_processed(bridge_addr, 1u64), 3);
+        coin::destroy_mint_cap(mint_cap);
+        coin::destroy_burn_cap(burn_cap);
+    }
+
+    // ── deliver_packet: full oracle/relayer/endpoint pipeline ─────────────────
+    //
+    // This test uses the production lz_receive entry function (which calls
+    // endpoint::lz_receive internally) rather than the test-only bypass.
+    // Oracle proposes the packet hash, relayer verifies it through the ULN,
+    // then endpoint::lz_receive consumes it from the inbox — the real production path.
+    #[test(
+        vault_owner = @0x200,
+        bridge_acct = @YieldAggregator,
+        lz = @layerzero,
+        msglib_auth = @msglib_auth,
+        oracle = @0x500,
+        relayer = @0x501,
+        executor = @0x502,
+        executor_auth = @executor_auth,
+        framework = @0x1,
+    )]
+    public fun test_lz_receive_via_full_endpoint(
+        vault_owner: &signer,
+        bridge_acct: &signer,
+        lz: &signer,
+        msglib_auth: &signer,
+        oracle: &signer,
+        relayer: &signer,
+        executor: &signer,
+        executor_auth: &signer,
+        framework: &signer,
+    ) {
+        let (cap, mint_cap, burn_cap) = setup_lz_bridge(
+            bridge_acct, lz, msglib_auth, oracle, relayer, executor, executor_auth, framework,
+        );
+        let bridge_addr = signer::address_of(bridge_acct);
+
+        let owner_addr = signer::address_of(vault_owner);
+        account::create_account_for_test(owner_addr);
+        yield_vault::init(vault_owner);
+        let vault_addr = yield_vault::vault_address(owner_addr);
+        let seed = coin::mint<aptos_coin::AptosCoin>(10_000, &mint_cap);
+        coin::deposit(vault_addr, seed);
+        yield_vault::set_deployed_for_test(vault_addr, 1u64, 150);
+
+        // Lock 150 APT in bridge (simulates a prior bridge_out)
+        let lock_coins = coin::mint<aptos_coin::AptosCoin>(150, &mint_cap);
+        let dst = vector::empty<u8>(); let i = 0u64;
+        while (i < 32) { vector::push_back(&mut dst, 0u8); i = i + 1; };
+        let out_payload = oft_bridge::encode_payload(1u8, 150u64, 1u64, 0u64, vault_addr);
+        oft_bridge::bridge_out(
+            &cap, bridge_addr, lock_coins, 101u64, dst,
+            out_payload, coin::zero<aptos_coin::AptosCoin>(), vector::empty<u8>(),
+        );
+
+        // Register trusted remote for Ethereum (chain 101)
+        let remote = vector::empty<u8>(); let i = 0u64;
+        while (i < 32) { vector::push_back(&mut remote, 0xDDu8); i = i + 1; };
+        oft_bridge::set_trusted_remote(bridge_acct, bridge_addr, 101u64, remote);
+
+        // Build the inbound packet as if it came from Ethereum
+        let in_payload = oft_bridge::encode_payload(4u8, 150u64, 1u64, 10u64, vault_addr);
+        let bridge_dst_bytes = std::bcs::to_bytes(&bridge_addr);
+        let pkt = packet::new_packet(
+            101,              // src: Ethereum
+            remote,           // src address (must match trusted remote)
+            108,              // dst: Aptos
+            bridge_dst_bytes, // dst address: oft_bridge module account
+            10,               // nonce
+            in_payload,
+        );
+
+        // Oracle proposes hash, relayer verifies through ULN — queues packet in LZ inbox
+        test_helpers::deliver_packet<oft_bridge::VaultBridgeOFT>(oracle, relayer, pkt, 15);
+
+        let idle_before = yield_vault::get_idle_assets(vault_addr);
+
+        // Call the PRODUCTION entry function — endpoint::lz_receive fires inside
+        oft_bridge::lz_receive(101u64, remote, in_payload, bridge_addr);
+
+        assert!(oft_bridge::get_locked_apt(bridge_addr) == 0, 0);
+        assert!(yield_vault::get_idle_assets(vault_addr) == idle_before + 150, 1);
+        assert!(oft_bridge::is_nonce_processed(bridge_addr, 10u64), 2);
         coin::destroy_mint_cap(mint_cap);
         coin::destroy_burn_cap(burn_cap);
     }
@@ -621,7 +707,7 @@ module YieldAggregator::bridge_tests {
         executor_auth: &signer,
         framework: &signer,
     ) {
-        let (mint_cap, burn_cap) = setup_lz_bridge(bridge_acct, lz, msglib_auth, oracle, relayer, executor, executor_auth, framework);
+        let (cap, mint_cap, burn_cap) = setup_lz_bridge(bridge_acct, lz, msglib_auth, oracle, relayer, executor, executor_auth, framework);
         let bridge_addr = signer::address_of(bridge_acct);
 
         let owner_addr = signer::address_of(vault_owner);
@@ -637,7 +723,7 @@ module YieldAggregator::bridge_tests {
         let lock_coins = coin::mint<aptos_coin::AptosCoin>(600, &mint_cap);
         let dst = vector::empty<u8>(); let i = 0u64; while (i < 32) { vector::push_back(&mut dst, 0u8); i = i + 1; };
         let out_payload = oft_bridge::encode_payload(1u8, 600u64, 1u64, 0u64, vault_addr);
-        oft_bridge::bridge_out(bridge_acct, bridge_addr, lock_coins, 101u64, dst, out_payload, coin::zero<aptos_coin::AptosCoin>(), vector::empty<u8>());
+        oft_bridge::bridge_out(&cap, bridge_addr, lock_coins, 101u64, dst, out_payload, coin::zero<aptos_coin::AptosCoin>(), vector::empty<u8>());
 
         let remote = vector::empty<u8>(); let i = 0u64; while (i < 32) { vector::push_back(&mut remote, 0xEEu8); i = i + 1; };
         oft_bridge::set_trusted_remote(bridge_acct, bridge_addr, 101u64, remote);
