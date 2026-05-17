@@ -11,6 +11,7 @@ module YieldAggregator::strategy_executor {
         strategy_id: u64,
         action: ExecutionActionType,
         amount: u64,
+        fee_amount: u64,
         target_chain: option::Option<u64>,
         nonce: u64,
     }
@@ -61,16 +62,16 @@ module YieldAggregator::strategy_executor {
 
         match (intent.action) {
             ExecutionActionType::Deposit => {
-                yield_vault::deploy_to_strategy(account, vault_addr, registry_addr, intent.strategy_id, intent.amount);
+                yield_vault::deploy_to_strategy(account, vault_addr, registry_addr, intent.strategy_id, intent.amount, intent.fee_amount);
             },
             ExecutionActionType::Withdraw => {
-                yield_vault::recall_from_strategy(account, vault_addr, registry_addr, intent.strategy_id, intent.amount);
+                yield_vault::recall_from_strategy(account, vault_addr, registry_addr, intent.strategy_id, intent.amount, intent.fee_amount);
             },
             ExecutionActionType::Harvest => {
-                yield_vault::harvest_strategy(account, vault_addr, registry_addr, intent.strategy_id);
+                yield_vault::harvest_strategy(account, vault_addr, registry_addr, intent.strategy_id, intent.fee_amount);
             },
             ExecutionActionType::Exit => {
-                yield_vault::recall_from_strategy(account, vault_addr, registry_addr, intent.strategy_id, intent.amount);
+                yield_vault::recall_from_strategy(account, vault_addr, registry_addr, intent.strategy_id, intent.amount, intent.fee_amount);
             },
         };
 
@@ -85,22 +86,22 @@ module YieldAggregator::strategy_executor {
 
     #[test_only]
     public fun make_deposit_intent(strategy_id: u64, amount: u64, nonce: u64): ExecutionIntent {
-        ExecutionIntent { strategy_id, action: ExecutionActionType::Deposit, amount, target_chain: option::none(), nonce }
+        ExecutionIntent { strategy_id, action: ExecutionActionType::Deposit, amount, fee_amount: 0, target_chain: option::none(), nonce }
     }
 
     #[test_only]
     public fun make_withdraw_intent(strategy_id: u64, amount: u64, nonce: u64): ExecutionIntent {
-        ExecutionIntent { strategy_id, action: ExecutionActionType::Withdraw, amount, target_chain: option::none(), nonce }
+        ExecutionIntent { strategy_id, action: ExecutionActionType::Withdraw, amount, fee_amount: 0, target_chain: option::none(), nonce }
     }
 
     #[test_only]
     public fun make_harvest_intent(strategy_id: u64, nonce: u64): ExecutionIntent {
-        ExecutionIntent { strategy_id, action: ExecutionActionType::Harvest, amount: 0, target_chain: option::none(), nonce }
+        ExecutionIntent { strategy_id, action: ExecutionActionType::Harvest, amount: 0, fee_amount: 0, target_chain: option::none(), nonce }
     }
 
     #[test_only]
     public fun make_exit_intent(strategy_id: u64, amount: u64, nonce: u64): ExecutionIntent {
-        ExecutionIntent { strategy_id, action: ExecutionActionType::Exit, amount, target_chain: option::none(), nonce }
+        ExecutionIntent { strategy_id, action: ExecutionActionType::Exit, amount, fee_amount: 0, target_chain: option::none(), nonce }
     }
 
 }

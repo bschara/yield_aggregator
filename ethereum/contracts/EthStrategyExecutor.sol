@@ -38,6 +38,8 @@ contract EthStrategyExecutor is Ownable, ReentrancyGuard {
     // Minimum gas delivered to Aptos on send-back messages
     uint256 public constant MIN_GAS_LIMIT = 300_000;
 
+    uint16 private constant APTOS_CHAIN_ID = 108;
+
     uint8 public constant ACTION_DEPLOY   = 0x01;
     uint8 public constant ACTION_RECALL   = 0x02;
     uint8 public constant ACTION_HARVEST  = 0x03;
@@ -163,13 +165,13 @@ contract EthStrategyExecutor is Ownable, ReentrancyGuard {
         bytes memory destination = abi.encodePacked(aptosBridgeAddress, address(oft));
 
         (uint256 lzFee,) = oft.estimateLzFee(
-            VaultOFT.APTOS_CHAIN_ID,
+            APTOS_CHAIN_ID,
             payload,
             adapterParams
         );
 
         oft.lzSend{value: lzFee}(
-            VaultOFT.APTOS_CHAIN_ID,
+            APTOS_CHAIN_ID,
             destination,
             payload,
             payable(address(this)),
@@ -189,7 +191,7 @@ contract EthStrategyExecutor is Ownable, ReentrancyGuard {
     ) external view returns (uint256 nativeFee) {
         bytes memory payload = oft.encodePayload(ACTION_COMPLETE, amount, strategyId, nonce, vaultAddr);
         bytes memory adapterParams = abi.encodePacked(uint16(1), MIN_GAS_LIMIT);
-        (nativeFee,) = oft.estimateLzFee(VaultOFT.APTOS_CHAIN_ID, payload, adapterParams);
+        (nativeFee,) = oft.estimateLzFee(APTOS_CHAIN_ID, payload, adapterParams);
     }
 
     // Allow receiving ETH for LayerZero fees

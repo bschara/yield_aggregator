@@ -1,5 +1,21 @@
 import { expect } from "chai";
-import { ethers } from "hardhat";
+import { network } from "hardhat";
+
+let ethers: any;
+before(async () => { ethers = (await network.getOrCreate()).ethers; });
+
+async function expectRevert(
+  promise: Promise<unknown>,
+  msg?: string
+): Promise<void> {
+  try {
+    await promise;
+    throw new Error("Expected transaction to revert");
+  } catch (e: any) {
+    if (e.message === "Expected transaction to revert") throw e;
+    if (msg) expect(e.message).to.include(msg);
+  }
+}
 
 describe("VaultOFT", () => {
   let vaultOFT: any;
@@ -11,10 +27,15 @@ describe("VaultOFT", () => {
     [owner, user] = await ethers.getSigners();
 
     const VaultOFTFactory = await ethers.getContractFactory("VaultOFT");
-    vaultOFT = await VaultOFTFactory.deploy(owner.address);
+    vaultOFT = await VaultOFTFactory.deploy(owner.address, owner.address);
 
-    const ExecutorFactory = await ethers.getContractFactory("EthStrategyExecutor");
-    executor = await ExecutorFactory.deploy(await vaultOFT.getAddress(), owner.address);
+    const ExecutorFactory = await ethers.getContractFactory(
+      "EthStrategyExecutor"
+    );
+    executor = await ExecutorFactory.deploy(
+      await vaultOFT.getAddress(),
+      owner.address
+    );
 
     await vaultOFT.setStrategyExecutor(await executor.getAddress());
   });
@@ -25,7 +46,9 @@ describe("VaultOFT", () => {
   });
 
   it("sets strategy executor", async () => {
-    expect(await vaultOFT.strategyExecutor()).to.equal(await executor.getAddress());
+    expect(await vaultOFT.strategyExecutor()).to.equal(
+      await executor.getAddress()
+    );
   });
 
   it("encodes and decodes payload correctly", async () => {
@@ -34,7 +57,12 @@ describe("VaultOFT", () => {
     const vaultAddr = ethers.zeroPadValue("0x1234", 32);
     const nonce = 7n;
 
-    const encoded = await vaultOFT.encodePayload(action, strategyId, vaultAddr, nonce);
+    const encoded = await vaultOFT.encodePayload(
+      action,
+      strategyId,
+      vaultAddr,
+      nonce
+    );
     const decoded = await vaultOFT.decodePayload(encoded);
 
     expect(decoded.action).to.equal(action);
@@ -44,9 +72,10 @@ describe("VaultOFT", () => {
   });
 
   it("rejects non-executor mint", async () => {
-    await expect(
-      vaultOFT.connect(user).mintBridge(user.address, 100n)
-    ).to.be.revertedWith("VaultOFT: not executor");
+    await expectRevert(
+      vaultOFT.connect(user).mintBridge(user.address, 100n),
+      "VaultOFT: not executor"
+    );
   });
 });
 
@@ -59,10 +88,15 @@ describe("EthStrategyExecutor", () => {
     [owner] = await ethers.getSigners();
 
     const VaultOFTFactory = await ethers.getContractFactory("VaultOFT");
-    vaultOFT = await VaultOFTFactory.deploy(owner.address);
+    vaultOFT = await VaultOFTFactory.deploy(owner.address, owner.address);
 
-    const ExecutorFactory = await ethers.getContractFactory("EthStrategyExecutor");
-    executor = await ExecutorFactory.deploy(await vaultOFT.getAddress(), owner.address);
+    const ExecutorFactory = await ethers.getContractFactory(
+      "EthStrategyExecutor"
+    );
+    executor = await ExecutorFactory.deploy(
+      await vaultOFT.getAddress(),
+      owner.address
+    );
 
     await vaultOFT.setStrategyExecutor(await executor.getAddress());
   });
@@ -72,22 +106,41 @@ describe("EthStrategyExecutor", () => {
   });
 
   it("rejects executeIncoming from non-OFT caller", async () => {
-    const payload = await vaultOFT.encodePayload(1, 0, ethers.zeroPadValue("0x01", 32), 1n);
-    await expect(
-      executor.connect(owner).executeIncoming(100n, payload)
-    ).to.be.revertedWith("Executor: only OFT");
+    const payload = await vaultOFT.encodePayload(
+      1,
+      0,
+      ethers.zeroPadValue("0x01", 32),
+      1n
+    );
+    await expectRevert(
+      executor.connect(owner).executeIncoming(100n, payload),
+      "Executor: only OFT"
+    );
   });
 
   it("rejects unknown action via impersonation", async () => {
-    await ethers.provider.send("hardhat_impersonateAccount", [await vaultOFT.getAddress()]);
-    await ethers.provider.send("hardhat_setBalance", [await vaultOFT.getAddress(), "0x1000000000000000000"]);
+    await ethers.provider.send("hardhat_impersonateAccount", [
+      await vaultOFT.getAddress(),
+    ]);
+    await ethers.provider.send("hardhat_setBalance", [
+      await vaultOFT.getAddress(),
+      "0x1000000000000000000",
+    ]);
     const oftSigner = await ethers.getSigner(await vaultOFT.getAddress());
 
-    const payload = await vaultOFT.encodePayload(0xFF, 0, ethers.zeroPadValue("0x01", 32), 1n);
-    await expect(
-      executor.connect(oftSigner).executeIncoming(100n, payload)
-    ).to.be.revertedWith("Executor: unknown action");
+    const payload = await vaultOFT.encodePayload(
+      0xff,
+      0,
+      ethers.zeroPadValue("0x01", 32),
+      1n
+    );
+    await expectRevert(
+      executor.connect(oftSigner).executeIncoming(100n, payload),
+      "Executor: unknown action"
+    );
 
-    await ethers.provider.send("hardhat_stopImpersonatingAccount", [await vaultOFT.getAddress()]);
+    await ethers.provider.send("hardhat_stopImpersonatingAccount", [
+      await vaultOFT.getAddress(),
+    ]);
   });
 });

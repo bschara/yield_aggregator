@@ -7,6 +7,7 @@ module YieldAggregator::strategy_tests {
     use YieldAggregator::yield_vault;
     use YieldAggregator::strategy_registry;
     use YieldAggregator::strategy_executor;
+    use YieldAggregator::adapter_registry;
 
     fun setup(
         vault_owner: &signer,
@@ -25,6 +26,7 @@ module YieldAggregator::strategy_tests {
         let adapter_addr = signer::address_of(adapter);
         account::create_account_for_test(adapter_addr);
         coin::register<aptos_coin::AptosCoin>(adapter);
+        adapter_registry::register_for_test(adapter, adapter_registry::type_eth_bridge(), false);
 
         let user_addr = signer::address_of(user);
         account::create_account_for_test(user_addr);
@@ -49,7 +51,7 @@ module YieldAggregator::strategy_tests {
         let (vault_addr, owner_addr, burn_cap, mint_cap) =
             setup(vault_owner, adapter, user, &framework, 1000, 500);
 
-        yield_vault::deploy_to_strategy(vault_owner, vault_addr, owner_addr, 0, 200);
+        yield_vault::deploy_to_strategy(vault_owner, vault_addr, owner_addr, 0, 200, 0);
 
         assert!(yield_vault::get_idle_assets(vault_addr) == 300, 0);
         assert!(yield_vault::get_deployed_assets(vault_addr) == 200, 1);
@@ -68,7 +70,7 @@ module YieldAggregator::strategy_tests {
         let (vault_addr, owner_addr, burn_cap, mint_cap) =
             setup(vault_owner, adapter, user, &framework, 1000, 500);
 
-        yield_vault::deploy_to_strategy(vault_owner, vault_addr, owner_addr, 0, 200);
+        yield_vault::deploy_to_strategy(vault_owner, vault_addr, owner_addr, 0, 200, 0);
 
         assert!(yield_vault::get_total_assets(vault_addr) == 500, 0);
 
@@ -83,8 +85,8 @@ module YieldAggregator::strategy_tests {
         let (vault_addr, owner_addr, burn_cap, mint_cap) =
             setup(vault_owner, adapter, user, &framework, 1000, 500);
 
-        yield_vault::deploy_to_strategy(vault_owner, vault_addr, owner_addr, 0, 300);
-        yield_vault::recall_from_strategy(vault_owner, vault_addr, owner_addr, 0, 300);
+        yield_vault::deploy_to_strategy(vault_owner, vault_addr, owner_addr, 0, 300, 0);
+        yield_vault::recall_from_strategy(vault_owner, vault_addr, owner_addr, 0, 300, 0);
 
         assert!(yield_vault::get_idle_assets(vault_addr) == 500, 0);
         assert!(yield_vault::get_deployed_assets(vault_addr) == 0, 1);
@@ -103,8 +105,8 @@ module YieldAggregator::strategy_tests {
         let (vault_addr, owner_addr, burn_cap, mint_cap) =
             setup(vault_owner, adapter, user, &framework, 1000, 500);
 
-        yield_vault::deploy_to_strategy(vault_owner, vault_addr, owner_addr, 0, 300);
-        yield_vault::recall_from_strategy(vault_owner, vault_addr, owner_addr, 0, 100);
+        yield_vault::deploy_to_strategy(vault_owner, vault_addr, owner_addr, 0, 300, 0);
+        yield_vault::recall_from_strategy(vault_owner, vault_addr, owner_addr, 0, 100, 0);
 
         assert!(yield_vault::get_idle_assets(vault_addr) == 300, 0);
         assert!(yield_vault::get_deployed_assets(vault_addr) == 200, 1);
@@ -122,7 +124,7 @@ module YieldAggregator::strategy_tests {
         let (vault_addr, owner_addr, burn_cap, mint_cap) =
             setup(vault_owner, adapter, user, &framework, 100, 500);
 
-        yield_vault::deploy_to_strategy(vault_owner, vault_addr, owner_addr, 0, 200);
+        yield_vault::deploy_to_strategy(vault_owner, vault_addr, owner_addr, 0, 200, 0);
 
         coin::destroy_mint_cap(mint_cap);
         coin::destroy_burn_cap(burn_cap);
@@ -151,7 +153,7 @@ module YieldAggregator::strategy_tests {
             setup(vault_owner, adapter, user, &framework, 1000, 500);
 
         strategy_registry::remove_strategy(vault_owner, owner_addr, 0);
-        yield_vault::deploy_to_strategy(vault_owner, vault_addr, owner_addr, 0, 200);
+        yield_vault::deploy_to_strategy(vault_owner, vault_addr, owner_addr, 0, 200, 0);
 
         coin::destroy_mint_cap(mint_cap);
         coin::destroy_burn_cap(burn_cap);
@@ -180,8 +182,8 @@ module YieldAggregator::strategy_tests {
         let (vault_addr, owner_addr, burn_cap, mint_cap) =
             setup(vault_owner, adapter, user, &framework, 1000, 500);
 
-        yield_vault::deploy_to_strategy(vault_owner, vault_addr, owner_addr, 0, 200);
-        yield_vault::recall_from_strategy(vault_owner, vault_addr, owner_addr, 0, 300);
+        yield_vault::deploy_to_strategy(vault_owner, vault_addr, owner_addr, 0, 200, 0);
+        yield_vault::recall_from_strategy(vault_owner, vault_addr, owner_addr, 0, 300, 0);
 
         coin::destroy_mint_cap(mint_cap);
         coin::destroy_burn_cap(burn_cap);
@@ -194,8 +196,8 @@ module YieldAggregator::strategy_tests {
         let (vault_addr, owner_addr, burn_cap, mint_cap) =
             setup(vault_owner, adapter, user, &framework, 1000, 500);
 
-        yield_vault::deploy_to_strategy(vault_owner, vault_addr, owner_addr, 0, 200);
-        yield_vault::harvest_strategy(vault_owner, vault_addr, owner_addr, 0);
+        yield_vault::deploy_to_strategy(vault_owner, vault_addr, owner_addr, 0, 200, 0);
+        yield_vault::harvest_strategy(vault_owner, vault_addr, owner_addr, 0, 0);
 
         assert!(yield_vault::was_harvest_event_emitted(0, 0), 0);
 
@@ -214,7 +216,7 @@ module YieldAggregator::strategy_tests {
         let engine_addr = signer::address_of(engine);
         yield_vault::set_operator(vault_owner, vault_addr, engine_addr);
 
-        yield_vault::deploy_to_strategy(engine, vault_addr, owner_addr, 0, 200);
+        yield_vault::deploy_to_strategy(engine, vault_addr, owner_addr, 0, 200, 0);
 
         assert!(yield_vault::get_deployed_assets(vault_addr) == 200, 0);
 
