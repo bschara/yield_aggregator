@@ -103,22 +103,39 @@ export async function readAllocationFromTable(
 let harvestCursor = 0;
 let deployCursor = 0;
 
+const EVENTS_QUERY = `
+  query GetEvents($event_type: String!, $limit: Int!, $offset: Int!) {
+    events(
+      where: { indexed_type: { _eq: $event_type } },
+      limit: $limit,
+      offset: $offset,
+      order_by: { transaction_version: asc }
+    ) { data }
+  }
+`;
+
 export async function pollHarvestEvents(limit = 25): Promise<HarvestEventData[]> {
-  const events = await aptos.getModuleEventsByEventType({
-    eventType: `${MODULE}::yield_vault::HarvestEvent`,
-    options: { limit, offset: harvestCursor },
+  const result = await aptos.queryIndexer<{ events: Array<{ data: unknown }> }>({
+    query: {
+      query: EVENTS_QUERY,
+      variables: { event_type: `${MODULE}::yield_vault::HarvestEvent`, limit, offset: harvestCursor },
+    },
   });
+  const events = result.events ?? [];
   harvestCursor += events.length;
-  return events as unknown as HarvestEventData[];
+  return events.map((e) => e.data as unknown as HarvestEventData);
 }
 
 export async function pollDeployEvents(limit = 25): Promise<DeployEventData[]> {
-  const events = await aptos.getModuleEventsByEventType({
-    eventType: `${MODULE}::yield_vault::DeployEvent`,
-    options: { limit, offset: deployCursor },
+  const result = await aptos.queryIndexer<{ events: Array<{ data: unknown }> }>({
+    query: {
+      query: EVENTS_QUERY,
+      variables: { event_type: `${MODULE}::yield_vault::DeployEvent`, limit, offset: deployCursor },
+    },
   });
+  const events = result.events ?? [];
   deployCursor += events.length;
-  return events as unknown as DeployEventData[];
+  return events.map((e) => e.data as unknown as DeployEventData);
 }
 
 export async function fetchChainState(

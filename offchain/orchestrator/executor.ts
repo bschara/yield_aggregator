@@ -1,6 +1,8 @@
 import {
   Account,
   Ed25519PrivateKey,
+  MoveFunctionId,
+  SimpleEntryFunctionArgumentTypes,
   UserTransactionResponse,
 } from "@aptos-labs/ts-sdk";
 import { aptos as sharedClient } from "../indexer/on_chain_listener.js";
@@ -29,12 +31,12 @@ export interface ExecutionResult {
 
 async function submitEntryFunction(
   fn: string,
-  functionArguments: unknown[],
+  functionArguments: SimpleEntryFunctionArgumentTypes[],
   operator: Account
 ): Promise<string> {
   const txn = await sharedClient.transaction.build.simple({
     sender: operator.accountAddress,
-    data: { function: fn, functionArguments },
+    data: { function: fn as MoveFunctionId, functionArguments },
   });
   const signed = await sharedClient.signAndSubmitTransaction({ signer: operator, transaction: txn });
   const committed = (await sharedClient.waitForTransaction({
@@ -53,7 +55,7 @@ function buildFunctionArgs(
   vaultAddr: string,
   registryAddr: string,
   intent: ExecutionIntent
-): unknown[] {
+): SimpleEntryFunctionArgumentTypes[] {
   const base = [vaultAddr, registryAddr, BigInt(intent.strategy_id)];
   if (fnKey === "harvest_and_send") {
     return [...base, BigInt(intent.fee_amount)];
