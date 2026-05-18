@@ -74,7 +74,7 @@ npm test
 1. Deploy Aptos contracts to localnet
 2. Deploy VaultOFT + EthStrategyExecutor to Hardhat node
 3. Wire trusted remotes on both sides
-4. Operator submits deploy_and_bridge.move script on Aptos
+4. Operator calls `eth_bridge_adapter::deploy_and_bridge_entry` on Aptos
    └─ vault: idle_assets -= amount, deployed_assets += amount
    └─ APT locked in oft_bridge state
 5. helpers/relay.ts relays the LZ message to Ethereum

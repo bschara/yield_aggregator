@@ -160,24 +160,7 @@ aptos move run \
 
 ---
 
-## 7. Compile Move scripts (required for offchain executor)
-
-```bash
-cd aptos
-aptos move compile --named-addresses YieldAggregator=<your_addr>
-
-# Compiled bytecodes land in:
-# aptos/build/yield_aggregator/bytecode_scripts/
-#   deploy_and_bridge.mv
-#   harvest_and_send.mv
-#   recall_and_send.mv
-```
-
-The offchain executor loads these `.mv` files at runtime.
-
----
-
-## 8. Configure and start offchain engine
+## 7. Configure and start offchain engine
 
 ```bash
 cd offchain
@@ -191,7 +174,6 @@ APTOS_RPC=https://fullnode.testnet.aptoslabs.com/v1
 APTOS_MODULE_ADDR=0x<your_deployed_module_addr>
 VAULT_ADDR=0x<vault_resource_account_addr>
 REGISTRY_ADDR=0x<registry_resource_account_addr>
-ENGINE_ADDR=0x<deployer_addr>   # ExecutionState lives on the deployer
 OPERATOR_PRIVATE_KEY=<ed25519_private_key_hex>
 ETH_RPC=https://sepolia.infura.io/v3/<your_key>
 VAULT_OFT_ADDR=0x<vault_oft_addr>

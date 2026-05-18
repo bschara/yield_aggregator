@@ -105,12 +105,7 @@ async function tick(): Promise<void> {
     return;
   }
 
-  const result = await executeIntent(
-    intent,
-    VAULT_ADDR,
-    REGISTRY_ADDR,
-    ENGINE_ADDR
-  );
+  const result = await executeIntent(intent, VAULT_ADDR, REGISTRY_ADDR);
   if (result.success) {
     console.log(`[main] submitted ${result.action} tx=${result.txHash}`);
   } else {

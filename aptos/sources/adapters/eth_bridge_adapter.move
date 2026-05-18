@@ -7,6 +7,8 @@ module YieldAggregator::eth_bridge_adapter {
     use aptos_framework::timestamp;
     use YieldAggregator::oft_bridge::{Self, BridgeCapability};
     use YieldAggregator::adapter_registry;
+    use YieldAggregator::yield_vault;
+    use YieldAggregator::strategy_registry;
 
     const ADAPTER_SEED: vector<u8> = b"EthBridgeAdapter";
 
@@ -84,18 +86,12 @@ module YieldAggregator::eth_bridge_adapter {
         account::create_resource_address(&owner, ADAPTER_SEED)
     }
 
-    // Manual operator entry point use when you want explicit control over bridging
-    // rather than relying on trigger_deposit from the vault dispatch path.
-    // Fee is withdrawn from caller's account; APT must already be in adapter CoinStore.
-    public entry fun bridge_out(
-        account: &signer,
-        adapter_addr: address,
-        amount: u64,
-        fee_amount: u64,
-    ) acquires EthAdapter {
-        let state = borrow_global_mut<EthAdapter>(adapter_addr);
-        assert!(signer::address_of(account) == state.owner, ENOT_OWNER);
+    // -----------------------------------------------------------------------
+    // Private helpers contain the bridge logic so entry funs can delegate
+    // without violating the rule that entry funs cannot call other entry funs.
+    // -----------------------------------------------------------------------
 
+    fun inner_bridge_out(account: &signer, state: &mut EthAdapter, amount: u64, fee_amount: u64) {
         state.nonce = state.nonce + 1;
         let nonce = state.nonce;
 
@@ -120,17 +116,7 @@ module YieldAggregator::eth_bridge_adapter {
         0x1::event::emit(DeployBridgedEvent { amount, nonce, timestamp: timestamp::now_microseconds() });
     }
 
-    // Signal Ethereum to withdraw `amount` and send it back.
-    // Fee withdrawn from caller's account.
-    public entry fun send_recall(
-        account: &signer,
-        adapter_addr: address,
-        amount: u64,
-        fee_amount: u64,
-    ) acquires EthAdapter {
-        let state = borrow_global_mut<EthAdapter>(adapter_addr);
-        assert!(signer::address_of(account) == state.owner, ENOT_OWNER);
-
+    fun inner_send_recall(account: &signer, state: &mut EthAdapter, amount: u64, fee_amount: u64) {
         state.nonce = state.nonce + 1;
         let nonce = state.nonce;
         let fee = coin::withdraw<AptosCoin>(account, fee_amount);
@@ -150,16 +136,7 @@ module YieldAggregator::eth_bridge_adapter {
         0x1::event::emit(RecallSentEvent { amount, nonce, timestamp: timestamp::now_microseconds() });
     }
 
-    // Signal Ethereum to collect yield and send it back.
-    // Fee withdrawn from caller's account.
-    public entry fun send_harvest(
-        account: &signer,
-        adapter_addr: address,
-        fee_amount: u64,
-    ) acquires EthAdapter {
-        let state = borrow_global_mut<EthAdapter>(adapter_addr);
-        assert!(signer::address_of(account) == state.owner, ENOT_OWNER);
-
+    fun inner_send_harvest(account: &signer, state: &mut EthAdapter, fee_amount: u64) {
         state.nonce = state.nonce + 1;
         let nonce = state.nonce;
         let fee = coin::withdraw<AptosCoin>(account, fee_amount);
@@ -177,6 +154,97 @@ module YieldAggregator::eth_bridge_adapter {
         );
 
         0x1::event::emit(HarvestSentEvent { nonce, timestamp: timestamp::now_microseconds() });
+    }
+
+    // -----------------------------------------------------------------------
+    // Single-step entry points (bridge only vault accounting done separately)
+    // -----------------------------------------------------------------------
+
+    // Manual operator entry point: use when you want explicit control over bridging
+    // rather than relying on the combined entry functions below.
+    // Fee is withdrawn from caller's account; APT must already be in adapter CoinStore.
+    public entry fun bridge_out(
+        account: &signer,
+        adapter_addr: address,
+        amount: u64,
+        fee_amount: u64,
+    ) acquires EthAdapter {
+        let state = borrow_global_mut<EthAdapter>(adapter_addr);
+        assert!(signer::address_of(account) == state.owner, ENOT_OWNER);
+        inner_bridge_out(account, state, amount, fee_amount);
+    }
+
+    // Signal Ethereum to withdraw `amount` and send it back.
+    public entry fun send_recall(
+        account: &signer,
+        adapter_addr: address,
+        amount: u64,
+        fee_amount: u64,
+    ) acquires EthAdapter {
+        let state = borrow_global_mut<EthAdapter>(adapter_addr);
+        assert!(signer::address_of(account) == state.owner, ENOT_OWNER);
+        inner_send_recall(account, state, amount, fee_amount);
+    }
+
+    // Signal Ethereum to collect yield and send it back.
+    public entry fun send_harvest(
+        account: &signer,
+        adapter_addr: address,
+        fee_amount: u64,
+    ) acquires EthAdapter {
+        let state = borrow_global_mut<EthAdapter>(adapter_addr);
+        assert!(signer::address_of(account) == state.owner, ENOT_OWNER);
+        inner_send_harvest(account, state, fee_amount);
+    }
+
+    // -----------------------------------------------------------------------
+    // Combined entry points vault accounting + bridge in one transaction.
+    // These replace the Move scripts (deploy_and_bridge.move etc.) and are
+    // called directly by the offchain executor via function name.
+    // -----------------------------------------------------------------------
+
+    public entry fun deploy_and_bridge_entry(
+        account: &signer,
+        vault_addr: address,
+        registry_addr: address,
+        strategy_id: u64,
+        amount: u64,
+        fee_amount: u64,
+    ) acquires EthAdapter {
+        yield_vault::deploy_to_strategy(account, vault_addr, registry_addr, strategy_id, amount, fee_amount);
+        let adapter_addr = strategy_registry::get_adapter(registry_addr, strategy_id);
+        let state = borrow_global_mut<EthAdapter>(adapter_addr);
+        assert!(signer::address_of(account) == state.owner, ENOT_OWNER);
+        inner_bridge_out(account, state, amount, fee_amount);
+    }
+
+    public entry fun recall_and_send_entry(
+        account: &signer,
+        vault_addr: address,
+        registry_addr: address,
+        strategy_id: u64,
+        amount: u64,
+        fee_amount: u64,
+    ) acquires EthAdapter {
+        yield_vault::recall_from_strategy(account, vault_addr, registry_addr, strategy_id, amount, fee_amount);
+        let adapter_addr = strategy_registry::get_adapter(registry_addr, strategy_id);
+        let state = borrow_global_mut<EthAdapter>(adapter_addr);
+        assert!(signer::address_of(account) == state.owner, ENOT_OWNER);
+        inner_send_recall(account, state, amount, fee_amount);
+    }
+
+    public entry fun harvest_and_send_entry(
+        account: &signer,
+        vault_addr: address,
+        registry_addr: address,
+        strategy_id: u64,
+        fee_amount: u64,
+    ) acquires EthAdapter {
+        yield_vault::harvest_strategy(account, vault_addr, registry_addr, strategy_id, fee_amount);
+        let adapter_addr = strategy_registry::get_adapter(registry_addr, strategy_id);
+        let state = borrow_global_mut<EthAdapter>(adapter_addr);
+        assert!(signer::address_of(account) == state.owner, ENOT_OWNER);
+        inner_send_harvest(account, state, fee_amount);
     }
 
     public fun trigger_emergency_exit(_adapter_addr: address, _fee_amount: u64) {}

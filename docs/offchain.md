@@ -44,7 +44,7 @@ The offchain engine automates vault management. Every 30 seconds it reads on-cha
 │  │                    ORCHESTRATOR                          │    │
 │  │                                                          │    │
 │  │  intent_builder.ts  ──▶  executor.ts                     │    │
-│  │  buildDeployIntent()     ├─ loads compiled .mv bytecode  │    │
+│  │  buildDeployIntent()     ├─ calls entry fun by name      │    │
 │  │  buildRecallIntent()     ├─ signs with operator key      │    │
 │  │  buildHarvestIntent()    └─ submits Aptos transaction    │    │
 │  └──────────────────────────────────────────────────────────┘    │
@@ -224,12 +224,12 @@ Nonces are monotonically increasing from `Math.floor(Date.now() / 1000)` on star
 
 ### `orchestrator/executor.ts`
 
-Loads pre-compiled Move script bytecodes and submits them as script transactions via the Aptos SDK v2:
+Calls `public entry fun` wrappers on-chain by qualified function name via the Aptos SDK v2 — no pre-compiled bytecode files required:
 
 ```typescript
 aptos.transaction.build.simple({
   sender,
-  data: { bytecode, functionArguments },
+  data: { function: "<MODULE_ADDR>::eth_bridge_adapter::deploy_and_bridge_entry", functionArguments },
 });
 aptos.signAndSubmitTransaction({ signer: operatorAccount, transaction });
 aptos.waitForTransaction({ transactionHash });
@@ -237,16 +237,18 @@ aptos.waitForTransaction({ transactionHash });
 
 **Operator key** is loaded from `OPERATOR_PRIVATE_KEY` env var via `Account.fromPrivateKey(Ed25519PrivateKey)`.
 
-**Script mapping:**
+**`MODULE_ADDR`** is read from `APTOS_MODULE_ADDR` env var.
 
-| Action  | Script file            |
-| ------- | ---------------------- |
-| deploy  | `deploy_and_bridge.mv` |
-| recall  | `recall_and_send.mv`   |
-| harvest | `harvest_and_send.mv`  |
-| exit    | `recall_and_send.mv`   |
+**Function mapping:**
 
-Bytecodes must be present at `aptos/build/yield_aggregator/bytecode_scripts/`. If missing, the executor logs a warning and skips execution. Generate with: `cd aptos && aptos move compile`.
+| Action  | Entry function                                    |
+| ------- | ------------------------------------------------- |
+| deploy  | `eth_bridge_adapter::deploy_and_bridge_entry`     |
+| recall  | `eth_bridge_adapter::recall_and_send_entry`       |
+| harvest | `eth_bridge_adapter::harvest_and_send_entry`      |
+| exit    | `eth_bridge_adapter::recall_and_send_entry`       |
+
+Each combined entry function atomically performs vault accounting and initiates the LayerZero bridge message in a single Aptos transaction.
 
 ---
 
@@ -260,7 +262,6 @@ All settings via environment variables (copy `offchain/.env.example` → `offcha
 | `APTOS_MODULE_ADDR`        | —                          | Deployed module address                           |
 | `VAULT_ADDR`               | —                          | Vault resource account address                    |
 | `REGISTRY_ADDR`            | —                          | Strategy registry address                         |
-| `ENGINE_ADDR`              | —                          | Strategy executor address                         |
 | `OPERATOR_PRIVATE_KEY`     | —                          | Ed25519 private key (hex)                         |
 | `ETH_RPC`                  | `http://localhost:8545`    | Ethereum node RPC                                 |
 | `VAULT_OFT_ADDR`           | —                          | VaultOFT contract address                         |

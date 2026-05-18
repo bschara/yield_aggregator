@@ -138,7 +138,7 @@ struct ExecutionIntent has copy, drop, store {
 
 **Routing**: `Deposit → deploy_to_strategy`, `Withdraw/Exit → recall_from_strategy`, `Harvest → harvest_strategy`.
 
-> `execute_intent` is `public fun`, not `public entry fun`. Call it via a compiled Move script, not directly from a transaction.
+> `execute_intent` is `public fun`, not `public entry fun`. It is available for future use but the offchain executor does not call it — vault operations are triggered directly via the combined entry functions in `eth_bridge_adapter`.
 
 ---
 
@@ -155,7 +155,7 @@ Thin dispatch layer. Looks up the adapter type from `adapter_registry` and route
 | `harvest(adapter_addr, fee_amount)`          | `lending_adapter::trigger_harvest`        |
 | `emergency_exit(adapter_addr, fee_amount)`   | `lending_adapter::trigger_emergency_exit` |
 
-`eth_bridge_adapter` is intentionally excluded from this dispatch to avoid circular module dependencies. It is invoked directly by scripts.
+`eth_bridge_adapter` is intentionally excluded from this dispatch to avoid circular module dependencies. Vault accounting and bridge signalling are handled together by the combined entry functions in `eth_bridge_adapter`.
 
 ---
 
@@ -212,10 +212,18 @@ struct EthAdapter has key {
 | Function                                                                                       | Description                                                    |
 | ---------------------------------------------------------------------------------------------- | -------------------------------------------------------------- |
 | `init(account, vault_addr, bridge_addr, dst_chain_id, dst_vault_oft, strategy_id, bridge_cap)` | Sets up adapter, registers as async with adapter_registry.     |
-| `bridge_out(account, adapter_addr, amount, fee_amount)`                                        | Sends APT to Ethereum via LayerZero (ACTION_DEPLOY).           |
-| `send_recall(account, adapter_addr, amount, fee_amount)`                                       | Signals Ethereum to withdraw (ACTION_RECALL, zero-coin).       |
-| `send_harvest(account, adapter_addr, fee_amount)`                                              | Signals Ethereum to harvest yield (ACTION_HARVEST, zero-coin). |
+| `bridge_out(account, adapter_addr, amount, fee_amount)`                                        | Sends APT to Ethereum via LayerZero (ACTION_DEPLOY). Bridge only — vault accounting must be done separately. |
+| `send_recall(account, adapter_addr, amount, fee_amount)`                                       | Signals Ethereum to withdraw (ACTION_RECALL, zero-coin). Bridge only. |
+| `send_harvest(account, adapter_addr, fee_amount)`                                              | Signals Ethereum to harvest yield (ACTION_HARVEST, zero-coin). Bridge only. |
 | `trigger_emergency_exit(adapter_addr, fee_amount)`                                             | **Stubbed.**                                                   |
+
+**Combined entry functions** (called by the offchain executor — vault accounting + bridge in one transaction):
+
+| Function                                                                                                  | Description                            |
+| --------------------------------------------------------------------------------------------------------- | -------------------------------------- |
+| `deploy_and_bridge_entry(account, vault_addr, registry_addr, strategy_id, amount, fee_amount)`            | `deploy_to_strategy` + `bridge_out`.   |
+| `recall_and_send_entry(account, vault_addr, registry_addr, strategy_id, amount, fee_amount)`              | `recall_from_strategy` + `send_recall`. |
+| `harvest_and_send_entry(account, vault_addr, registry_addr, strategy_id, fee_amount)`                     | `harvest_strategy` + `send_harvest`.   |
 
 ---
 
@@ -254,12 +262,4 @@ Called by `oft_bridge::lz_receive_impl` after APT is unlocked and nonce is dedup
 
 ## Scripts
 
-Pre-written Move scripts that atomically combine multiple module calls.
-
-| Script                   | What it does                                                             |
-| ------------------------ | ------------------------------------------------------------------------ |
-| `deploy_and_bridge.move` | Calls `execute_intent(Deposit)` then `eth_bridge_adapter.bridge_out()`   |
-| `harvest_and_send.move`  | Calls `execute_intent(Harvest)` then `eth_bridge_adapter.send_harvest()` |
-| `recall_and_send.move`   | Calls `execute_intent(Withdraw)` then `eth_bridge_adapter.send_recall()` |
-
-The offchain executor loads compiled bytecodes (`.mv`) from `aptos/build/yield_aggregator/bytecode_scripts/` and submits them as script transactions.
+The `aptos/scripts/` directory is intentionally empty. Vault accounting and bridge signalling are handled together by the combined entry functions in `eth_bridge_adapter` (`deploy_and_bridge_entry`, `recall_and_send_entry`, `harvest_and_send_entry`), which the offchain executor calls directly by qualified function name — no pre-compiled bytecodes required.
