@@ -1,0 +1,19 @@
+{
+  "name": "yield-aggregator-offchain",
+  "version": "1.0.0",
+  "type": "module",
+  "scripts": {
+    "start": "tsx main.ts",
+    "dev": "tsx --watch main.ts"
+  },
+  "dependencies": {
+    "@aptos-labs/ts-sdk": "^5.2.1",
+    "dotenv": "^16.4.5",
+    "ethers": "^6.13.0"
+  },
+  "devDependencies": {
+    "@types/node": "^22.0.0",
+    "tsx": "^4.19.0",
+    "typescript": "^5.5.0"
+  }
+}
