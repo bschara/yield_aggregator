@@ -8,7 +8,6 @@ test-aptos:
 test-eth:
 	cd ethereum && npm test
 
-# Cross-VM e2e (requires Aptos localnet running)
 test-e2e:
 	aptos node run-local-testnet --with-faucet &
 	cd ethereum && npx hardhat node &
