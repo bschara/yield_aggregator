@@ -1,27 +1,47 @@
 import "dotenv/config";
 import { fetchChainState } from "./indexer/on_chain_listener.js";
 import { buildVaultState } from "./indexer/position_tracker.js";
-import { initEthListener, syncEthEvents, getAllPending } from "./indexer/eth_listener.js";
-import { update as updateApy, buildApyMap, getLastHarvestTsMap } from "./analytics/apy_tracker.js";
-import { buildDeployIntent, buildRecallIntent, buildHarvestIntent } from "./orchestrator/intent_builder.js";
+import {
+  initEthListener,
+  syncEthEvents,
+  getAllPending,
+} from "./indexer/eth_listener.js";
+import {
+  update as updateApy,
+  buildApyMap,
+  getLastHarvestTsMap,
+} from "./analytics/apy_tracker.js";
+import {
+  buildDeployIntent,
+  buildRecallIntent,
+  buildHarvestIntent,
+} from "./orchestrator/intent_builder.js";
 import { executeIntent } from "./orchestrator/executor.js";
 
-const VAULT_ADDR     = process.env.VAULT_ADDR!;
-const REGISTRY_ADDR  = process.env.REGISTRY_ADDR!;
-const ENGINE_ADDR    = process.env.ENGINE_ADDR!;
+const VAULT_ADDR = process.env.VAULT_ADDR!;
+const REGISTRY_ADDR = process.env.REGISTRY_ADDR!;
+const ENGINE_ADDR = process.env.ENGINE_ADDR!;
 const VAULT_OFT_ADDR = process.env.VAULT_OFT_ADDR!;
-const ETH_RPC        = process.env.ETH_RPC!;
-const POLICY_URL     = process.env.POLICY_SERVER_URL ?? "http://localhost:8001";
-const LOOP_MS        = parseInt(process.env.LOOP_INTERVAL_MS ?? "30000");
+const ETH_RPC = process.env.ETH_RPC!;
+const POLICY_URL = process.env.POLICY_SERVER_URL ?? "http://localhost:8001";
+const LOOP_MS = parseInt(process.env.LOOP_INTERVAL_MS ?? "30000");
 const BRIDGE_TIMEOUT = parseInt(process.env.BRIDGE_TIMEOUT_SEC ?? "600");
 
-async function callPolicy(body: object): Promise<{ type: string; strategyId?: string; amountOctas?: number; reason: string }> {
+async function callPolicy(
+  body: object
+): Promise<{
+  type: string;
+  strategyId?: string;
+  amountOctas?: number;
+  reason: string;
+}> {
   const res = await fetch(`${POLICY_URL}/decide`, {
     method: "POST",
     headers: { "Content-Type": "application/json" },
     body: JSON.stringify(body),
   });
-  if (!res.ok) throw new Error(`policy server ${res.status}: ${await res.text()}`);
+  if (!res.ok)
+    throw new Error(`policy server ${res.status}: ${await res.text()}`);
   return res.json();
 }
 
@@ -39,7 +59,7 @@ async function tick(): Promise<void> {
   // 3. Update analytics
   const deployedAmounts = new Map<number, bigint>();
   for (const s of snapshot.strategies) {
-    // deployedAmounts populated from vault allocations table in position_tracker
+    //deployedAmounts populated from vault allocations table in position_tracker
   }
   updateApy(
     snapshot.harvestEvents,
@@ -56,10 +76,10 @@ async function tick(): Promise<void> {
 
   console.log(
     `[main] TVL=${vaultState.tvl.toFixed(4)} APT  ` +
-    `idle=${vaultState.idleAssets.toFixed(4)} APT  ` +
-    `util=${(vaultState.utilization * 100).toFixed(1)}%  ` +
-    `strategies=${vaultState.strategies.length}  ` +
-    `pendingBridges=${pendingBridges.length}`
+      `idle=${vaultState.idleAssets.toFixed(4)} APT  ` +
+      `util=${(vaultState.utilization * 100).toFixed(1)}%  ` +
+      `strategies=${vaultState.strategies.length}  ` +
+      `pendingBridges=${pendingBridges.length}`
   );
 
   // 5. Ask policy server for action
@@ -85,7 +105,12 @@ async function tick(): Promise<void> {
     return;
   }
 
-  const result = await executeIntent(intent, VAULT_ADDR, REGISTRY_ADDR, ENGINE_ADDR);
+  const result = await executeIntent(
+    intent,
+    VAULT_ADDR,
+    REGISTRY_ADDR,
+    ENGINE_ADDR
+  );
   if (result.success) {
     console.log(`[main] submitted ${result.action} tx=${result.txHash}`);
   } else {
@@ -95,8 +120,12 @@ async function tick(): Promise<void> {
 
 async function main(): Promise<void> {
   console.log("[main] yield aggregator offchain engine starting");
-  console.log(`[main] vault=${VAULT_ADDR} registry=${REGISTRY_ADDR} engine=${ENGINE_ADDR}`);
-  console.log(`[main] loop interval=${LOOP_MS}ms  bridge timeout=${BRIDGE_TIMEOUT}s`);
+  console.log(
+    `[main] vault=${VAULT_ADDR} registry=${REGISTRY_ADDR} engine=${ENGINE_ADDR}`
+  );
+  console.log(
+    `[main] loop interval=${LOOP_MS}ms  bridge timeout=${BRIDGE_TIMEOUT}s`
+  );
 
   initEthListener(ETH_RPC, VAULT_OFT_ADDR);
 
@@ -106,8 +135,12 @@ async function main(): Promise<void> {
     if (!health.ok) throw new Error(`HTTP ${health.status}`);
     console.log("[main] policy server healthy");
   } catch (err) {
-    console.error(`[main] policy server not reachable at ${POLICY_URL}: ${err}`);
-    console.error("[main] start it with: python3 -m uvicorn ai.server:app --port 8001");
+    console.error(
+      `[main] policy server not reachable at ${POLICY_URL}: ${err}`
+    );
+    console.error(
+      "[main] start it with: python3 -m uvicorn ai.server:app --port 8001"
+    );
     process.exit(1);
   }
 
