@@ -10,6 +10,14 @@ The aggregator connects Aptos and Ethereum via a custom LayerZero V1 bridge. Use
 
 ```
 ┌─────────────────────────────────────────────────────────────┐
+│                    REACT FRONTEND (Vite)                    │
+│  Petra wallet connect · deposit / withdraw · vault metrics  │
+│  strategy list · bridge activity · cross-chain data         │
+│  reads: Aptos RPC, Ethereum RPC, policy server /health      │
+└───────────────────┬──────────────────────┬──────────────────┘
+                    │ Aptos RPC            │ policy /health
+                    ▼                      ▼
+┌─────────────────────────────────────────────────────────────┐
 │                        APTOS CHAIN                          │
 │                                                             │
 │  ┌─────────────────────────────────────────────────────┐   │
@@ -172,6 +180,9 @@ APT is the Aptos native coin and cannot be burned by a third-party module. The b
 
 **Why custom payload instead of standard OFT wire format?**
 The standard LayerZero OFT format carries only `amount` and `receiver`. The aggregator needs `action`, `strategy_id`, and `nonce` in every message, requiring a custom 57-byte payload on both sides.
+
+**Why Python for the policy server?**
+The current `rebalance_policy.py` is a deterministic rule tree, but the Python ecosystem (scikit-learn, statsmodels, PyTorch, Stable-Baselines3) is the natural home for the planned ML upgrade: APY forecasting, risk clustering, and RL-based rebalancing. The TypeScript loop calls `POST /decide` over HTTP — swapping rules for a trained model is a policy server change only.
 
 **Why `public fun` rather than `public entry fun` for vault operations?**
 Strategy operations (deploy, recall, harvest) are designed to be called from Move scripts, not directly from transactions. This enforces that they always go through the operator-gated `strategy_engine::execute_intent` with nonce replay protection. The offchain executor submits pre-compiled Move script bytecodes.

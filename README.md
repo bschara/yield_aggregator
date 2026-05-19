@@ -7,6 +7,13 @@ The architecture is designed for multi-chain expansion — Ethereum is the first
 ## Architecture Overview
 
 ```
+          ┌─────────────────────────────────────────────────┐
+          │              REACT FRONTEND (Vite)              │
+          │  Petra wallet · deposit/withdraw · metrics       │
+          │  strategy list · bridge activity feed           │
+          └──────────┬──────────────────────┬──────────────┘
+                     │ Aptos RPC            │ policy /health
+                     ▼                      ▼
                          USER
                           │  deposit / withdraw APT
                           ▼
@@ -48,8 +55,10 @@ The architecture is designed for multi-chain expansion — Ethereum is the first
 cross_platform_yield_aggregator/
 ├── aptos/              Move smart contracts (vault, bridge, strategies)
 ├── ethereum/           Solidity contracts (VaultOFT, EthStrategyExecutor)
+├── frontend/           React SPA (Vite + React 19, Petra wallet, deposit/withdraw UI, vault metrics)
 ├── e2e-tests/          Cross-chain round-trip integration tests
-├── offchain/           Yield Engine, Risk Engine, Analytics, Orchestrator
+├── offchain/           TypeScript loop: Indexer, Analytics, Orchestrator
+│   └── ai/             Python policy server (FastAPI) — rule-based today, ML-extensible
 └── Makefile            Top-level build and run commands
 ```
 
@@ -68,6 +77,7 @@ cross_platform_yield_aggregator/
 make install-offchain
 cd ethereum && npm install
 cd e2e-tests && npm install
+cd frontend && npm install
 ```
 
 ### 2. Run tests
@@ -89,16 +99,36 @@ make start-policy
 make start-offchain
 ```
 
+### 4. Run the frontend
+
+```bash
+cd frontend && npm run dev
+# → http://localhost:5173
+```
+
+Connect Petra wallet, deposit APT, and monitor vault metrics in real time.
+
+## Why Python for the AI layer?
+
+The policy server (`offchain/ai/`) is written in Python rather than TypeScript by design. The current implementation is a deterministic rule-based decision tree (over-exposure guard → stale bridge guard → underperformer recall → deploy → harvest), but the architecture is intentionally ML-extensible:
+
+- **APY forecasting** — time-series models (statsmodels, Prophet) to predict which strategies will outperform before deploying capital
+- **Risk clustering** — scikit-learn to group strategies by correlated risk factors and avoid concentration
+- **RL-based rebalancing** — reinforcement learning policy (Stable-Baselines3 / PyTorch) trained on historical vault state to optimise long-run yield
+
+The TypeScript loop communicates with the policy server over HTTP (`POST /decide`) — the transport is language-agnostic, so upgrading from rules to models requires no changes to the TypeScript side.
+
 ## Documentation
 
-| Doc                                              | Description                                             |
-| ------------------------------------------------ | ------------------------------------------------------- |
-| [Architecture](docs/architecture.md)             | Cross-chain data flow, component design, payload format |
-| [Aptos Contracts](docs/aptos-contracts.md)       | Vault, strategy registry, adapters, OFT bridge API      |
-| [Ethereum Contracts](docs/ethereum-contracts.md) | VaultOFT, EthStrategyExecutor API                       |
-| [Offchain Layer](docs/offchain.md)               | Yield Engine, Risk Engine, Analytics, Orchestrator      |
-| [Deployment Guide](docs/deployment.md)           | Step-by-step testnet and mainnet deployment             |
-| [E2E Testing](docs/e2e-testing.md)               | Running and extending the bridge test suite             |
+| Doc                                              | Description                                                |
+| ------------------------------------------------ | ---------------------------------------------------------- |
+| [Architecture](docs/architecture.md)             | Cross-chain data flow, component design, payload format    |
+| [Aptos Contracts](docs/aptos-contracts.md)       | Vault, strategy registry, adapters, OFT bridge API         |
+| [Ethereum Contracts](docs/ethereum-contracts.md) | VaultOFT, EthStrategyExecutor API                          |
+| [Offchain Layer](docs/offchain.md)               | Yield Engine, Risk Engine, Analytics, Orchestrator         |
+| [Frontend](docs/frontend.md)                     | React SPA: pages, data hooks, wallet integration, env vars |
+| [Deployment Guide](docs/deployment.md)           | Step-by-step testnet and mainnet deployment                |
+| [E2E Testing](docs/e2e-testing.md)               | Running and extending the bridge test suite                |
 
 ## Planned Chain Support
 
@@ -122,17 +152,18 @@ Each new chain needs:
 
 ## Implementation Status
 
-| Component                     | Status             | Notes                                      |
-| ----------------------------- | ------------------ | ------------------------------------------ |
-| Aptos vault core              | ✅ Complete        | deposit, withdraw, deploy, recall, harvest |
-| OFT bridge (Aptos ↔ Ethereum) | ✅ Complete        | LayerZero V1, 57-byte payload              |
-| Ethereum VaultOFT             | ✅ Complete        | wAPT ERC-20 + LZ messaging                 |
-| Ethereum strategy executor    | ⚠️ Bridge complete | Aave/DEX integration stubbed               |
-| Aptos lending adapter         | ❌ Stubbed         | Aries/Echelon integration needed           |
-| Offchain: Yield Engine        | ✅ Complete        | strategy scoring, deploy/harvest logic     |
-| Offchain: Risk Engine         | ✅ Complete        | exposure limits, stale bridge detection    |
-| Offchain: Analytics Index     | ✅ Complete        | APY tracking, TVL history                  |
-| Offchain: Orchestrator        | ✅ Complete        | intent builder + Aptos executor            |
-| Pause / circuit breaker       | ❌ Missing         | flag exists, no functions                  |
-| Fee collection                | ❌ Missing         | bps stored, never distributed              |
-| Multi-sig / timelock          | ❌ Missing         | single operator key                        |
+| Component                     | Status             | Notes                                                    |
+| ----------------------------- | ------------------ | -------------------------------------------------------- |
+| Aptos vault core              | ✅ Complete        | deposit, withdraw, deploy, recall, harvest               |
+| OFT bridge (Aptos ↔ Ethereum) | ✅ Complete        | LayerZero V1, 57-byte payload                            |
+| Ethereum VaultOFT             | ✅ Complete        | wAPT ERC-20 + LZ messaging                               |
+| Ethereum strategy executor    | ⚠️ Bridge complete | Aave/DEX integration stubbed                             |
+| Aptos lending adapter         | ❌ Stubbed         | Aries/Echelon integration needed                         |
+| Offchain: Yield Engine        | ✅ Complete        | strategy scoring, deploy/harvest logic                   |
+| Offchain: Risk Engine         | ✅ Complete        | exposure limits, stale bridge detection                  |
+| Offchain: Analytics Index     | ✅ Complete        | APY tracking, TVL history                                |
+| Offchain: Orchestrator        | ✅ Complete        | intent builder + Aptos executor                          |
+| React frontend                | ✅ Complete        | Vite + React 19, Petra wallet, deposit/withdraw, metrics |
+| Pause / circuit breaker       | ❌ Missing         | flag exists, no functions                                |
+| Fee collection                | ❌ Missing         | bps stored, never distributed                            |
+| Multi-sig / timelock          | ❌ Missing         | single operator key                                      |

@@ -53,6 +53,20 @@ The offchain engine automates vault management. Every 30 seconds it reads on-cha
 
 ---
 
+## Why Python?
+
+The policy server is written in Python rather than TypeScript. The current decision logic is a deterministic priority-ordered rule tree — no ML yet — but Python is the right foundation for where this is heading:
+
+| Planned capability          | Library                    |
+| --------------------------- | -------------------------- |
+| APY time-series forecasting | statsmodels, Prophet       |
+| Risk factor clustering      | scikit-learn               |
+| RL-based rebalancing policy | Stable-Baselines3, PyTorch |
+
+The TypeScript loop calls `POST /decide` over HTTP. Upgrading from rules to a trained model is a policy server change only — the TypeScript side is unaffected.
+
+---
+
 ## Indexer
 
 ### `indexer/on_chain_listener.ts`
@@ -229,7 +243,10 @@ Calls `public entry fun` wrappers on-chain by qualified function name via the Ap
 ```typescript
 aptos.transaction.build.simple({
   sender,
-  data: { function: "<MODULE_ADDR>::eth_bridge_adapter::deploy_and_bridge_entry", functionArguments },
+  data: {
+    function: "<MODULE_ADDR>::eth_bridge_adapter::deploy_and_bridge_entry",
+    functionArguments,
+  },
 });
 aptos.signAndSubmitTransaction({ signer: operatorAccount, transaction });
 aptos.waitForTransaction({ transactionHash });
@@ -241,12 +258,12 @@ aptos.waitForTransaction({ transactionHash });
 
 **Function mapping:**
 
-| Action  | Entry function                                    |
-| ------- | ------------------------------------------------- |
-| deploy  | `eth_bridge_adapter::deploy_and_bridge_entry`     |
-| recall  | `eth_bridge_adapter::recall_and_send_entry`       |
-| harvest | `eth_bridge_adapter::harvest_and_send_entry`      |
-| exit    | `eth_bridge_adapter::recall_and_send_entry`       |
+| Action  | Entry function                                |
+| ------- | --------------------------------------------- |
+| deploy  | `eth_bridge_adapter::deploy_and_bridge_entry` |
+| recall  | `eth_bridge_adapter::recall_and_send_entry`   |
+| harvest | `eth_bridge_adapter::harvest_and_send_entry`  |
+| exit    | `eth_bridge_adapter::recall_and_send_entry`   |
 
 Each combined entry function atomically performs vault accounting and initiates the LayerZero bridge message in a single Aptos transaction.
 
@@ -275,15 +292,38 @@ All settings via environment variables (copy `offchain/.env.example` → `offcha
 
 ## Running
 
-```bash
-make install-offchain
+### Python policy server
 
+```bash
+cd offchain/ai
+pip install -r requirements.txt
+uvicorn server:app --reload --port 8001
+# → http://localhost:8001
+```
+
+Or via the top-level Makefile shortcut:
+
+```bash
 make start-policy
 # → starts uvicorn on http://localhost:8001
+```
 
-# Terminal 2: start TypeScript main loop
+### TypeScript main loop
+
+```bash
+# Terminal 2
 make start-offchain
 # → polls every 30s, logs each tick + action taken
 ```
 
 On startup the main loop checks `/health` on the policy server and exits if it is unreachable.
+
+### Tests
+
+```bash
+# TypeScript (Vitest)
+cd offchain && npm test
+
+# Python (pytest)
+cd offchain/ai && pytest tests/ -v
+```
